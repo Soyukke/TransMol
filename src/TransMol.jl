@@ -1,5 +1,7 @@
 module TransMol
 
-greet() = print("Hello World!")
+include("atom.jl")
+include("bond.jl")
+include("molecule.jl")
 
 end # module
