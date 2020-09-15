@@ -1,5 +1,7 @@
 export Molecule
-export add_atom!
+export add_atom!, add_atom, add_bond, add_bond!
+export natom, nbond
+using Printf
 using LightGraphs, MetaGraphs
 
 struct Molecule
@@ -53,6 +55,10 @@ function add_bond(m::Molecule, i::Integer, j::Integer, b::Bond)
     return m2
 end
 
+function get_atom(m::Molecule, i::Integer)
+    atom = get_prop(m.graph, i, :atom)
+    return atom
+end
 
 """
 atom `i` に関する残り原子価数
@@ -84,10 +90,28 @@ function bondorder(m::Molecule, i::Integer, j::Integer)
 end
 
 """
+全原子
+"""
+function atoms(mol::Molecule)
+    natom_ = natom(mol)
+    allatoms = map(i -> get_prop(mol.graph, i, :atom), 1:natom_)
+    # 原子番号でsort
+    sort!(allatoms, by = atom -> atom.number)
+    return allatoms
+end
+
+"""
 原子数
 """
 function natom(mol::Molecule)
     return nv(mol.graph)
+end
+
+"""
+結合数
+"""
+function nbond(mol::Molecule)
+    return ne(mol.graph)
 end
 
 """
@@ -119,20 +143,40 @@ doublebond => [triplebond]                   : 結合次数2
 """
 function addable_bond(mol::Molecule)
     bonddict = Dict(0 => [1, 2, 3], 1 => [2, 3], 2 => [3])
+    mols = Molecule[]
     n_atom = natom(mol)
     for i ∈ 1:n_atom, j ∈ 1:n_atom
         nf1 = nfree(mol, i)
         nf2 = nfree(mol, j)
         order = bondorder(mol, i, j)
         nfreemin = min(nf1, nf2)
-        @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
+        bonds = filter(x->x ≤ nfreemin, bonddict[order])
+        for transorder ∈ bonds
+            newbond = Bond(transorder)
+            push!(mols, add_bond(mol, i, j, newbond))
+        end
+        # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
     end
+    return mols
 end
 
 """
 結合削除
+singlebond => [None]                        : 結合次数1
+doublebond => [None, singlebond]            : 結合次数2
+triplebond => [None, singlebond, doublebond]: 結合次数3
 """
 function removable_bond(mol::Molecule)
+    # 結合削除dict
+    bonddict = Dict(0 => [], 1 => [0], 2 => [0, 1], 3 => [0, 1, 2])
+    n_atom = natom(mol)
+    mols = Molecule[]
+    list = []
+    for i ∈ 1:n_atom, j ∈ 1:n_atom
+        order = bondorder(mol, i, j)
+        push!(list, bonddict[order])
+    end
+    return list
 end
 
 function example1()
@@ -151,5 +195,82 @@ function example1()
     @show bondorder(mol, 1, 2)
     @show addable_atom(mol)
     @show addable_bond(mol)
+    @show removable_bond(mol)
     mol
+end
+
+function example2()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(2)
+    bond2 = Bond(1)
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 1, 3, bond2)
+    print(sdf(mol))
+end
+
+"""
+Molecule -> sdf
+https://en.wikipedia.org/wiki/Chemical_table_file
+"""
+function sdf(mol::Molecule)
+    name = "mol name"
+    programname = "program name"
+    comment = "hoge"
+    n_atom = natom(mol)
+    n_bond = nbond(mol)
+    natomlist = 0
+    chiralfrag = 0
+    nstextentries = 0
+    nprops = 0
+    molversion = "V2000"
+    counts = "$(n_atom) $(n_bond) $(natomlist) $(chiralfrag) $(nstextentries) $(nprops) $(molversion)"
+    atom_block = String[]
+    for i ∈ 1:n_atom
+        atom = get_atom(mol, i)
+        x, y, z = 0.0, 0.0, 0.0
+        name = string(atom.name)
+        massdiff = 0
+        charge = 0
+        sss = 0
+        nhydrogen = 0
+        bbb = 0
+        valence = 0
+        numbers = [massdiff, charge, sss, nhydrogen, bbb, valence]
+        nstrs = map(x -> @sprintf("%d", x), numbers)
+        line = "" *
+        @sprintf("% 6.4f", x) *
+        @sprintf("% 6.4f", y) *
+        @sprintf("% 6.4f", z) *
+        " " *
+        name * " " * join(nstrs, " ")
+        push!(atom_block, line)
+        # hhh, rrr, iii, mmm, nnn, eee = 0, 0, 0, 0, 0, 0
+    end
+
+    # 結合テーブル
+    bond_block = String[]
+    for i ∈ 1:n_atom, j ∈ 1:n_atom
+        nf1 = nfree(mol, i)
+        nf2 = nfree(mol, j)
+        order = bondorder(mol, i, j)
+        if order == 0
+            continue
+        end
+        numbers = [i, j, order, 0, 0, 0]
+        strs = string.(numbers)
+        line = join(strs, " ")
+        push!(bond_block, line)
+        # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
+    end
+
+    text = join(
+        [
+            name, programname, comment, comment, counts,
+            atom_block..., bond_block...
+        ], "\n"
+    )
 end
