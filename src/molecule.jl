@@ -225,26 +225,30 @@ function sdf(mol::Molecule)
     natomlist = 0
     chiralfrag = 0
     nstextentries = 0
-    nprops = 0
+    # M ENDはカウントされる
+    nprops = 1
     molversion = "V2000"
-    counts = "$(n_atom) $(n_bond) $(natomlist) $(chiralfrag) $(nstextentries) $(nprops) $(molversion)"
+    numbers = [n_atom, n_bond, natomlist, chiralfrag, nstextentries, nprops]
+    extra = " 0  0  0  0999"
+    strs = map(x -> @sprintf(" %d ", x), numbers)
+    counts = " " * join(strs, "") * extra * " $(molversion)"
     atom_block = String[]
     for i ∈ 1:n_atom
         atom = get_atom(mol, i)
         x, y, z = 0.0, 0.0, 0.0
-        name = string(atom.name)
+        name = "$(string(atom.name)) "
         massdiff = 0
         charge = 0
         sss = 0
         nhydrogen = 0
         bbb = 0
         valence = 0
-        numbers = [massdiff, charge, sss, nhydrogen, bbb, valence]
-        nstrs = map(x -> @sprintf("%d", x), numbers)
+        numbers = [massdiff, charge, sss, nhydrogen, bbb, valence, 0, 0, 0, 0, 0, 0,]
+        nstrs = map(x -> @sprintf(" %d", x), numbers)
         line = "" *
-        @sprintf("% 6.4f", x) *
-        @sprintf("% 6.4f", y) *
-        @sprintf("% 6.4f", z) *
+        @sprintf("% 10.4f", x) *
+        @sprintf("% 10.4f", y) *
+        @sprintf("% 10.4f", z) *
         " " *
         name * " " * join(nstrs, " ")
         push!(atom_block, line)
@@ -260,17 +264,23 @@ function sdf(mol::Molecule)
         if order == 0
             continue
         end
-        numbers = [i, j, order, 0, 0, 0]
-        strs = string.(numbers)
-        line = join(strs, " ")
+        numbers = [i, j, order, 0, 0, 0, 0]
+
+        strs = map(x -> @sprintf(" %d ", x), numbers)
+        line = " " * join(strs, "")
         push!(bond_block, line)
         # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
     end
+    prop_block = String[]
+    mend = "M  END"
+    push!(prop_block, mend)
 
     text = join(
         [
-            name, programname, comment, comment, counts,
-            atom_block..., bond_block...
+            name, programname, comment, counts,
+            atom_block..., bond_block..., prop_block...
         ], "\n"
     )
+    fpath = joinpath(@__DIR__, "../devtest/mol.sdf")
+    write(fpath, text)
 end
