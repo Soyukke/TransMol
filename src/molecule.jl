@@ -344,6 +344,9 @@ end
 再帰的にMoleculeを作る
 """
 function smilestomol(mol::Molecule, x::Vector, i)
+    # 注目している原子
+    current_atom_index = -1
+    current_bond_order = 1
     next = iterate(x, i)
     while next !== nothing 
         t, i = next
@@ -356,13 +359,18 @@ function smilestomol(mol::Molecule, x::Vector, i)
             println(t, "in nest")
             smilestomol(mol, x, i)
         else t ∈ ["1", "2", "3", "4", "5", "6", "7", "8"]
+            # 芳香環は別関数で対処する
         end
         # 原子と一致
         if haskey(atomdict, t)
             println("原子")
-            atomidx += 1
+            # 原子を追加したら注目している原子は追加した原子
+            @show current_atom_index, current_bond_order
+            current_atom_index = natom(mol)
         elseif haskey(bonddict, t)
             println("結合")
+            # 次に追加する原子の結合字数
+            current_bond_order = bonddict[t]
         end
         next = iterate(x, i)
     end
