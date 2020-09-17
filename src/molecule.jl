@@ -352,12 +352,15 @@ function smilestomol(mol::Molecule, x::Vector, i)
             println("out next")
             return mol, t
         elseif t == "("
+            # 結合をつなげる原子indexを保持する？
             println(t, "in nest")
             smilestomol(mol, x, i)
+        else t ∈ ["1", "2", "3", "4", "5", "6", "7", "8"]
         end
         # 原子と一致
         if haskey(atomdict, t)
             println("原子")
+            atomidx += 1
         elseif haskey(bonddict, t)
             println("結合")
         end
