@@ -1,6 +1,6 @@
 export Molecule
 export add_atom!, add_atom, add_bond, add_bond!
-export natom, nbond, writesdf
+export natom, nbond, writesdf, smilestomol
 using Printf
 using LightGraphs, MetaGraphs 
 using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg
@@ -317,4 +317,51 @@ end
 function writesdf(filename::AbstractString, mol::Molecule)
     text = sdfwithcoords(mol)
     write(filename, text)
+end
+
+"""
+smiles(mol::Molecule)::String
+
+SMILES文字列
+"""
+function smiles(mol::Molecule)
+end
+
+atomdict = Dict()
+for a in atomdata
+    push!(atomdict, string(a[begin]) => a)
+end
+bonddict = Dict(""=>1, "="=>2, "#"=>3)
+
+function smilestomol(smiles::String)
+    mol = Molecule()
+    x = split(smiles, "")
+    next = iterate(x)
+    smilestomol(mol, x, 1)
+end
+
+"""
+再帰的にMoleculeを作る
+"""
+function smilestomol(mol::Molecule, x::Vector, i)
+    next = iterate(x, i)
+    while next !== nothing 
+        t, i = next
+        # nestを抜ける
+        if t == ")"
+            println("out next")
+            return mol, t
+        elseif t == "("
+            println(t, "in nest")
+            smilestomol(mol, x, i)
+        end
+        # 原子と一致
+        if haskey(atomdict, t)
+            println("原子")
+        elseif haskey(bonddict, t)
+            println("結合")
+        end
+        next = iterate(x, i)
+    end
+    return mol, nothing
 end
