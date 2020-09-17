@@ -1,8 +1,9 @@
 export Molecule
 export add_atom!, add_atom, add_bond, add_bond!
-export natom, nbond
+export natom, nbond, writesdf
 using Printf
-using LightGraphs, MetaGraphs
+using LightGraphs, MetaGraphs 
+using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg
 
 struct Molecule
     graph::MetaGraph
@@ -58,6 +59,18 @@ end
 function get_atom(m::Molecule, i::Integer)
     atom = get_prop(m.graph, i, :atom)
     return atom
+end
+
+function get_coords(m::Molecule, i::Integer)
+    if !has_prop(m.graph, i, :coords)
+        return Float64[0, 0, 0]
+    else
+        return get_prop(m.graph, i, :coords)
+    end
+end
+
+function set_coords(m::Molecule, i::Integer, coords::Vector{T}) where T <: Real
+    set_prop!(m.graph, i, :coords, coords)
 end
 
 """
@@ -209,7 +222,12 @@ function example2()
     bond2 = Bond(1)
     add_bond!(mol, 1, 2, bond1)
     add_bond!(mol, 1, 3, bond2)
-    print(sdf(mol))
+    fpath = joinpath(@__DIR__, "..", "devtest", "mol.sdf")
+    writesdf(fpath, mol)
+    mol2 = sdftomol(fpath)
+    svglines = drawsvg(mol2, 600, 600)
+    fsvgpath = joinpath(@__DIR__, "..", "devtest", "mol.svg")
+    write(fsvgpath, svglines)
 end
 
 """
@@ -235,7 +253,7 @@ function sdf(mol::Molecule)
     atom_block = String[]
     for i ∈ 1:n_atom
         atom = get_atom(mol, i)
-        x, y, z = 0.0, 0.0, 0.0
+        x, y, z = get_coords(mol, i)
         name = "$(string(atom.name)) "
         massdiff = 0
         charge = 0
@@ -274,13 +292,29 @@ function sdf(mol::Molecule)
     prop_block = String[]
     mend = "M  END"
     push!(prop_block, mend)
+    lines = [
+        name, programname, comment, counts,
+        atom_block..., bond_block..., prop_block...
+    ]
+    return lines
+end
 
-    text = join(
-        [
-            name, programname, comment, counts,
-            atom_block..., bond_block..., prop_block...
-        ], "\n"
-    )
-    fpath = joinpath(@__DIR__, "../devtest/mol.sdf")
-    write(fpath, text)
+"""
+座標をセットしてsdfファイルを出力する
+"""
+function sdfwithcoords(mol::Molecule)
+    lines = sdf(mol)
+    sdfmol = sdftomol(lines)
+    # 描画用座標をセットする
+    coords, styles = coordgen(sdfmol)
+    for i ∈ 1:natom(mol)
+        set_coords(mol, i, Float64[coords[i, :]..., 0])
+    end
+    lines = sdf(mol)
+    text = join(lines, "\n")
+end
+
+function writesdf(filename::AbstractString, mol::Molecule)
+    text = sdfwithcoords(mol)
+    write(filename, text)
 end
