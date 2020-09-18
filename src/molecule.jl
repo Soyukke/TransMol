@@ -1,9 +1,10 @@
 export Molecule
 export add_atom!, add_atom, add_bond, add_bond!
+export atoms, bonds
 export natom, nbond, writesdf
 using Printf
 using LightGraphs, MetaGraphs 
-using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg
+using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg, GraphMol, SmilesAtom, SmilesBond, graphmol
 
 struct Molecule
     graph::MetaGraph
@@ -111,6 +112,17 @@ function atoms(mol::Molecule)
     # 原子番号でsort
     sort!(allatoms, by = atom -> atom.number)
     return allatoms
+end
+
+"""
+全結合
+"""
+function bonds(mol::Molecule)
+    bondmaps = collect(edges(mol.graph))
+    B = map(bondmaps) do bond
+        get_prop(mol.graph, bond.src, bond.dst, :bond)
+    end
+    return B, bondmaps
 end
 
 """
@@ -317,4 +329,51 @@ end
 function writesdf(filename::AbstractString, mol::Molecule)
     text = sdfwithcoords(mol)
     write(filename, text)
+end
+
+"""
+Molecule型へ変換する
+"""
+function Base.convert(::Type{Molecule}, m::GraphMol)
+    nodes = m.nodeattrs
+    edges = m.edges
+    edgeattrs = m.edgeattrs
+
+    mol = Molecule()
+    # 原子を追加
+    for node ∈ nodes
+        index = findfirst(a->a.name==node.symbol, atomlist)
+        atom = atomlist[index]
+        add_atom!(mol, atom)
+    end
+    # 結合を追加
+    for (edge, edgeattr) ∈ zip(edges, edgeattrs)
+        i, j = edge
+        bond = Bond(edgeattr.order)
+        add_bond!(mol, i, j, bond)
+    end
+    return mol
+end
+
+"""
+GraphMol型へ変換する
+"""
+function Base.convert(::Type{GraphMol}, m::Molecule)
+    # graphmol(edges, nodes, edgeattrs)
+    "edgeattrs"
+    "edges"
+    "nodeattrs"
+    A = atoms(m)
+    A₂ = map(A) do atom
+        SmilesAtom(atom.name, 0, 1, nothing, false, :unspecified)
+    end
+    # SmilesAtom(:C, 0, 1, nothing, false, :unspecified)
+    B, bondmaps = bonds(m)
+    bonds₂ = map(B) do bond
+        SmilesBond(bond.order, false, :unspecified, :unspecified)
+    end
+    es₂ = map(bondmaps) do bondmap
+        (bondmap.src, bondmap.dst)
+    end
+    graphmol(es₂, A₂, bonds₂)
 end
