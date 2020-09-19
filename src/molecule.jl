@@ -146,16 +146,23 @@ end
 また，原子追加後に同じ分子は削除してuniqueな原子追加を残す
 """
 function addable_atom(mol::Molecule)
-    list = []
+    mols = Molecule[]
     atoms = vertices(mol.graph)
     for (i, a) ∈ enumerate(atoms)
         nf = nfree(mol, i)
         if 1 ≤ nf
-            d = [i, atomlist]
-            push!(list, d)
+            for aⱼ ∈ atomlist
+                # 原子 aᵢ へ 結合する
+                mol₂ = add_atom(mol, aⱼ)
+                # 原子indexは最後
+                j = natom(mol₂)
+                bond = Bond(1)
+                add_bond!(mol₂, i, j, bond)
+                push!(mols, mol₂)
+            end
         end
     end
-    println(list)
+    return mols
 end
 
 """
@@ -218,10 +225,7 @@ function example1()
     @show nf
     @show natom(mol)
     @show bondorder(mol, 1, 2)
-    @show addable_atom(mol)
-    @show addable_bond(mol)
-    @show removable_bond(mol)
-    mol
+    addable_atom(mol)
 end
 
 function example2()
@@ -365,7 +369,8 @@ function Base.convert(::Type{GraphMol}, m::Molecule)
     "nodeattrs"
     A = atoms(m)
     A₂ = map(A) do atom
-        SmilesAtom(atom.name, 0, 1, nothing, false, :unspecified)
+        isaromatic = false
+        SmilesAtom(atom.name, 0, 1, nothing, isaromatic, :unspecified)
     end
     # SmilesAtom(:C, 0, 1, nothing, false, :unspecified)
     B, bondmaps = bonds(m)
