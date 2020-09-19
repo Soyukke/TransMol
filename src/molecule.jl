@@ -51,10 +51,23 @@ function add_bond!(m::Molecule, i::Integer, j::Integer, b::Bond)
     add_edge!(m.graph, i, j, dict)
 end
 
+"""
+i, jの結合を削除する
+"""
+function remove_bond!(m::Molecule, i::Integer, j::Integer)
+    rem_edge!(m.graph, i, j)
+end
+
 function add_bond(m::Molecule, i::Integer, j::Integer, b::Bond)
     m2 = deepcopy(m)
     add_bond!(m2, i, j, b)
     return m2
+end
+
+function remove_bond(m::Molecule, i::Integer, j::Integer)
+    m₂ = deepcopy(m)
+    remove_bond!(m₂, i, j)
+    return m₂
 end
 
 function get_atom(m::Molecule, i::Integer)
@@ -183,9 +196,9 @@ function addable_bond(mol::Molecule)
         order = bondorder(mol, i, j)
         nfreemin = min(nf1, nf2)
         bonds = filter(x->x ≤ nfreemin, bonddict[order])
-        for transorder ∈ bonds
-            newbond = Bond(transorder)
-            push!(mols, add_bond(mol, i, j, newbond))
+        for order₂ ∈ bonds
+            bond₂ = Bond(order₂)
+            push!(mols, add_bond(mol, i, j, bond₂))
         end
         # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
     end
@@ -206,9 +219,19 @@ function removable_bond(mol::Molecule)
     list = []
     for i ∈ 1:n_atom, j ∈ 1:n_atom
         order = bondorder(mol, i, j)
-        push!(list, bonddict[order])
+        for orderᵢⱼ ∈ bonddict[order]
+            bondᵢⱼ = Bond(orderᵢⱼ)
+            if orderᵢⱼ == 0
+                # 結合削除時 1  -> 0のときは
+                # edge削除
+                mol₂ = remove_bond(mol, i, j)
+                push!(mols, mol₂)
+            else
+                push!(mols, add_bond(mol, i, j, bondᵢⱼ))
+            end
+        end
     end
-    return list
+    return mols
 end
 
 function example1()
@@ -227,6 +250,23 @@ function example1()
     @show bondorder(mol, 1, 2)
     addable_atom(mol)
 end
+
+function example3()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(2)
+    bond2 = Bond(1)
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 1, 3, bond2)
+    nf = nfree(mol, 1)
+    addable_bond(mol)
+    removable_bond(mol)
+end
+
+
 
 function example2()
     mol = Molecule()
