@@ -303,7 +303,7 @@ function examplemol1()
     bond1 = Bond(2)
     bond2 = Bond(1)
     add_bond!(mol, 1, 2, bond1)
-    add_bond!(mol, 1, 3, bond2)
+    add_bond!(mol, 2, 3, bond2)
 
     mol2 = Molecule()
     C = Atom(:C, 6, 4)
@@ -313,10 +313,39 @@ function examplemol1()
     bond1 = Bond(1)
     bond2 = Bond(2)
     add_bond!(mol2, 1, 2, bond1)
-    add_bond!(mol2, 1, 3, bond2)
+    add_bond!(mol2, 2, 3, bond2)
 
     return mol, mol2
 end
+
+function examplemol2()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(1)
+    bond2 = Bond(1)
+    bond3 = Bond(1)
+    bond4 = Bond(1)
+    bond5 = Bond(1)
+    bond6 = Bond(1)
+    bond7 = Bond(2)
+    # 1 loop 1 分岐
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 2, 3, bond2)
+    add_bond!(mol, 3, 4, bond3)
+    add_bond!(mol, 4, 5, bond4)
+    add_bond!(mol, 5, 6, bond5)
+    add_bond!(mol, 6, 1, bond6)
+    add_bond!(mol, 2, 7, bond7)
+    return mol
+end
+
 
 """
 Molecule -> sdf
@@ -516,4 +545,139 @@ function permuteindex(m::Molecule)
         push!(setss, sets₂)
     end
     return setss
+end
+
+"""
+    moltosmiles(m::Molecule)
+
+Molecule -> SMILES
+"""
+function moltosmiles(m::Molecule)
+    # order = 2 -> "="
+    # order = 3 -> "#"
+    # 結合が複数ある場合は(で分岐
+    m = deepcopy(m)
+    # isparsed
+    for i ∈ 1:natom(m)
+        set_prop!(m.graph, i, :isparsed, false)
+    end
+    moltosmiles(m, -1, 1)
+end
+
+hasnext(indices, state) = iterate(indices, state) !== nothing
+
+"""
+`m`は分子
+`i₀`は一つ前の対象原子
+`i`は対象の原子
+"""
+function moltosmiles(m::Molecule, i₀::Int, i::Int)
+    set_prop!(m.graph, i, :isparsed, true)
+    aᵢ = get_atom(m, i)
+    print(aᵢ.name)
+    indices = neighbors(m.graph, i)
+    indices = filter(indices) do x
+        return x ≠ i₀
+    end
+    if indices === nothing || length(indices) == 0
+        return nothing
+    end
+    # 隣接原子数
+    next = iterate(indices)
+    index, state = next
+    while next !== nothing
+        # isparsedな原子の場合，ループ
+        j, state = next
+        isloop = get_prop(m.graph, j, :isparsed)
+        if isloop
+            print("1")
+        end
+        # 最後の結合ならば，()なしで表示
+        if !hasnext(indices, state)
+            printsmiles(m, i, j)
+        else
+            print("(")
+            printsmiles(m, i, j)
+            print(")")
+        end
+        next = iterate(indices, state)
+    end
+end
+
+function printsmiles(m::Molecule, i::Int, j::Int)
+    order = bondorder(m, i, j)
+    if order == 2
+        print("=")
+    elseif order == 3
+        print("#")
+    end
+    aⱼ = get_atom(m, j)
+    # 再帰呼び出し
+    moltosmiles(m, i, j)
+end
+
+function example6()
+    m1 = examplemol2()
+    moltosmiles(m1)
+end
+
+function example7()
+    m1 = examplemol2()
+    # moltosmiles(m1)
+    println()
+    closeloop(m1)
+end
+
+"""
+最小閉路探索
+vertexに情報を埋め込む
+"""
+function closeloop(m::Molecule)
+    closelist = []
+    dfs(m, 1, [], [], closelist)
+    closelist2 = []
+    for c ∈ closelist
+        # 同一閉路は省く
+        if c ∉ closelist2 && reverse(c) ∉ closelist2
+            push!(closelist2, c)
+        end
+    end
+    sort!(closelist, by = c -> length(c))
+    for cᵢ ∈ closelist
+        sᵢ = Set(cᵢ)
+        for cⱼ ∈ closelist2
+            sⱼ = Set(cⱼ)
+            if sⱼ ≠ sⱼ ∩ sᵢ
+                push!(closelist2, cᵢ)
+                break
+            end
+        end
+    end
+    for c in closelist2
+        println(c)
+    end
+end
+
+"""
+Deep-first search
+find loops
+"""
+function dfs(m::Molecule, v::Int, isvisited, target, closelist)
+    push!(isvisited, v)
+    target = copy(target)
+    if v ∈ target
+        push!(target, v)
+        push!(closelist, target)
+        return target
+    end
+    push!(target, v)
+    indices = neighbors(m.graph, v)
+    for i ∈ indices
+        # 直前の頂点以外
+        i₀ = 1 < length(target) ? target[end-1] : -1
+        if i ≠ i₀
+            dfs(m, i, isvisited, target, closelist)
+        end
+    end
+    return target
 end
