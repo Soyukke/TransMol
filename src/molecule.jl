@@ -5,6 +5,7 @@ export natom, nbond, writesdf
 using Printf
 using LightGraphs, MetaGraphs 
 using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg, GraphMol, SmilesAtom, SmilesBond, graphmol
+using Combinatorics
 
 struct Molecule
     graph::MetaGraph
@@ -21,10 +22,6 @@ end
 
 function Base.deepcopy(mol::Molecule)
     return Molecule(deepcopy(mol.graph))
-end
-
-function Base.isequal(m1::Molecule, m2::Molecule)
-    return m1.graph == m2.graph
 end
 
 """
@@ -286,6 +283,41 @@ function example2()
     write(fsvgpath, svglines)
 end
 
+function example4()
+    mol1, mol2 = examplemol1()
+    @show tomatrix(mol1)
+    @show tomatrix(mol2)
+end
+
+function example5()
+    mol1, mol2 = examplemol1()
+    return mol1 == mol2
+end
+
+function examplemol1()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(2)
+    bond2 = Bond(1)
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 1, 3, bond2)
+
+    mol2 = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol2, C)
+    add_atom!(mol2, C)
+    add_atom!(mol2, C)
+    bond1 = Bond(1)
+    bond2 = Bond(2)
+    add_bond!(mol2, 1, 2, bond1)
+    add_bond!(mol2, 1, 3, bond2)
+
+    return mol, mol2
+end
+
 """
 Molecule -> sdf
 https://en.wikipedia.org/wiki/Chemical_table_file
@@ -404,9 +436,6 @@ GraphMol型へ変換する
 """
 function Base.convert(::Type{GraphMol}, m::Molecule)
     # graphmol(edges, nodes, edgeattrs)
-    "edgeattrs"
-    "edges"
-    "nodeattrs"
     A = atoms(m)
     A₂ = map(A) do atom
         isaromatic = false
@@ -421,4 +450,70 @@ function Base.convert(::Type{GraphMol}, m::Molecule)
         (bondmap.src, bondmap.dst)
     end
     graphmol(es₂, A₂, bonds₂)
+end
+
+"""
+    Base.:(==)(mol₁::Molecule, mol₂::Molecule)
+
+分子の等価
+# 比較する
+- bond order
+"""
+function Base.:(==)(mol₁::Molecule, mol₂::Molecule)
+    setss = permuteindex(mol₁)
+    sets₂ = tomatrix(mol₂)
+    isequal = any(map(sets₁ -> sets₁ == sets₂, setss))
+    return isequal
+end
+
+"""
+    tomatrix
+
+MolecularのSet表現
+各原子について以下のリストを求め，Setにする
+原子名, 原子index i, 隣接原子index j, 結合次数ij
+"""
+function tomatrix(m::Molecule)
+    molset = Set{Set}()
+    n = natom(m)
+    for i ∈ 1:n
+        aᵢ = get_atom(m, i)
+        indices = neighbors(m.graph, i)
+        subset = Set()
+        for j ∈ indices
+            oᵢⱼ = bondorder(m, i, j)
+            data = [aᵢ.name, i, j, oᵢⱼ]
+            push!(subset, data)
+            # @show aᵢ.name, i, j, oᵢⱼ
+        end
+        push!(molset, subset)
+    end
+    return molset
+end
+
+"""
+    permuteindex(m::Molecule)
+
+グラフのvertex indexを入れ替えた全セットを返す
+グラフの等価性を求めるために使用する
+"""
+function permuteindex(m::Molecule)
+    # indexいれかえ
+    n = natom(m)
+    # [1, n]の順列
+    # n!通り
+    setss = []
+    sets = tomatrix(m)
+    for indices ∈ permutations(1:n)
+        sets₂ = deepcopy(sets)
+        # 単射
+        for sᵢ ∈ sets
+            for sᵢⱼ ∈ sᵢ
+                sᵢⱼ[2] = indices[sᵢⱼ[2]]
+                sᵢⱼ[3] = indices[sᵢⱼ[3]]
+            end
+        end
+        push!(setss, sets₂)
+    end
+    return setss
 end
