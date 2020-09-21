@@ -1,9 +1,12 @@
 export Molecule
 export add_atom!, add_atom, add_bond, add_bond!
 export natom, nbond, writesdf, smilestomol
+export atoms, bonds
+export natom, nbond, writesdf
 using Printf
 using LightGraphs, MetaGraphs 
-using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg
+using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg, GraphMol, SmilesAtom, SmilesBond, graphmol
+using Combinatorics
 
 struct Molecule
     graph::MetaGraph
@@ -20,10 +23,6 @@ end
 
 function Base.deepcopy(mol::Molecule)
     return Molecule(deepcopy(mol.graph))
-end
-
-function Base.isequal(m1::Molecule, m2::Molecule)
-    return m1.graph == m2.graph
 end
 
 """
@@ -50,10 +49,23 @@ function add_bond!(m::Molecule, i::Integer, j::Integer, b::Bond)
     add_edge!(m.graph, i, j, dict)
 end
 
+"""
+i, jの結合を削除する
+"""
+function remove_bond!(m::Molecule, i::Integer, j::Integer)
+    rem_edge!(m.graph, i, j)
+end
+
 function add_bond(m::Molecule, i::Integer, j::Integer, b::Bond)
     m2 = deepcopy(m)
     add_bond!(m2, i, j, b)
     return m2
+end
+
+function remove_bond(m::Molecule, i::Integer, j::Integer)
+    m₂ = deepcopy(m)
+    remove_bond!(m₂, i, j)
+    return m₂
 end
 
 function get_atom(m::Molecule, i::Integer)
@@ -114,6 +126,17 @@ function atoms(mol::Molecule)
 end
 
 """
+全結合
+"""
+function bonds(mol::Molecule)
+    bondmaps = collect(edges(mol.graph))
+    B = map(bondmaps) do bond
+        get_prop(mol.graph, bond.src, bond.dst, :bond)
+    end
+    return B, bondmaps
+end
+
+"""
 原子数
 """
 function natom(mol::Molecule)
@@ -134,16 +157,23 @@ end
 また，原子追加後に同じ分子は削除してuniqueな原子追加を残す
 """
 function addable_atom(mol::Molecule)
-    list = []
+    mols = Molecule[]
     atoms = vertices(mol.graph)
     for (i, a) ∈ enumerate(atoms)
         nf = nfree(mol, i)
         if 1 ≤ nf
-            d = [i, atomlist]
-            push!(list, d)
+            for aⱼ ∈ atomlist
+                # 原子 aᵢ へ 結合する
+                mol₂ = add_atom(mol, aⱼ)
+                # 原子indexは最後
+                j = natom(mol₂)
+                bond = Bond(1)
+                add_bond!(mol₂, i, j, bond)
+                push!(mols, mol₂)
+            end
         end
     end
-    println(list)
+    return mols
 end
 
 """
@@ -164,9 +194,9 @@ function addable_bond(mol::Molecule)
         order = bondorder(mol, i, j)
         nfreemin = min(nf1, nf2)
         bonds = filter(x->x ≤ nfreemin, bonddict[order])
-        for transorder ∈ bonds
-            newbond = Bond(transorder)
-            push!(mols, add_bond(mol, i, j, newbond))
+        for order₂ ∈ bonds
+            bond₂ = Bond(order₂)
+            push!(mols, add_bond(mol, i, j, bond₂))
         end
         # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
     end
@@ -187,9 +217,19 @@ function removable_bond(mol::Molecule)
     list = []
     for i ∈ 1:n_atom, j ∈ 1:n_atom
         order = bondorder(mol, i, j)
-        push!(list, bonddict[order])
+        for orderᵢⱼ ∈ bonddict[order]
+            bondᵢⱼ = Bond(orderᵢⱼ)
+            if orderᵢⱼ == 0
+                # 結合削除時 1  -> 0のときは
+                # edge削除
+                mol₂ = remove_bond(mol, i, j)
+                push!(mols, mol₂)
+            else
+                push!(mols, add_bond(mol, i, j, bondᵢⱼ))
+            end
+        end
     end
-    return list
+    return mols
 end
 
 function example1()
@@ -206,11 +246,25 @@ function example1()
     @show nf
     @show natom(mol)
     @show bondorder(mol, 1, 2)
-    @show addable_atom(mol)
-    @show addable_bond(mol)
-    @show removable_bond(mol)
-    mol
+    addable_atom(mol)
 end
+
+function example3()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(2)
+    bond2 = Bond(1)
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 1, 3, bond2)
+    nf = nfree(mol, 1)
+    addable_bond(mol)
+    removable_bond(mol)
+end
+
+
 
 function example2()
     mol = Molecule()
@@ -229,6 +283,70 @@ function example2()
     fsvgpath = joinpath(@__DIR__, "..", "devtest", "mol.svg")
     write(fsvgpath, svglines)
 end
+
+function example4()
+    mol1, mol2 = examplemol1()
+    @show tomatrix(mol1)
+    @show tomatrix(mol2)
+end
+
+function example5()
+    mol1, mol2 = examplemol1()
+    return mol1 == mol2
+end
+
+function examplemol1()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(2)
+    bond2 = Bond(1)
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 2, 3, bond2)
+
+    mol2 = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol2, C)
+    add_atom!(mol2, C)
+    add_atom!(mol2, C)
+    bond1 = Bond(1)
+    bond2 = Bond(2)
+    add_bond!(mol2, 1, 2, bond1)
+    add_bond!(mol2, 2, 3, bond2)
+
+    return mol, mol2
+end
+
+function examplemol2()
+    mol = Molecule()
+    C = Atom(:C, 6, 4)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    add_atom!(mol, C)
+    bond1 = Bond(1)
+    bond2 = Bond(1)
+    bond3 = Bond(1)
+    bond4 = Bond(1)
+    bond5 = Bond(1)
+    bond6 = Bond(1)
+    bond7 = Bond(2)
+    # 1 loop 1 分岐
+    add_bond!(mol, 1, 2, bond1)
+    add_bond!(mol, 2, 3, bond2)
+    add_bond!(mol, 3, 4, bond3)
+    add_bond!(mol, 4, 5, bond4)
+    add_bond!(mol, 5, 6, bond5)
+    add_bond!(mol, 6, 1, bond6)
+    add_bond!(mol, 2, 7, bond7)
+    return mol
+end
+
 
 """
 Molecule -> sdf
@@ -375,4 +493,282 @@ function smilestomol(mol::Molecule, x::Vector, i)
         next = iterate(x, i)
     end
     return mol, nothing
+end
+
+"""
+Molecule型へ変換する
+"""
+function Base.convert(::Type{Molecule}, m::GraphMol)
+    nodes = m.nodeattrs
+    edges = m.edges
+    edgeattrs = m.edgeattrs
+
+    mol = Molecule()
+    # 原子を追加
+    for node ∈ nodes
+        index = findfirst(a->a.name==node.symbol, atomlist)
+        atom = atomlist[index]
+        add_atom!(mol, atom)
+    end
+    # 結合を追加
+    for (edge, edgeattr) ∈ zip(edges, edgeattrs)
+        i, j = edge
+        bond = Bond(edgeattr.order)
+        add_bond!(mol, i, j, bond)
+    end
+    return mol
+end
+
+"""
+GraphMol型へ変換する
+"""
+function Base.convert(::Type{GraphMol}, m::Molecule)
+    # graphmol(edges, nodes, edgeattrs)
+    A = atoms(m)
+    A₂ = map(A) do atom
+        isaromatic = false
+        SmilesAtom(atom.name, 0, 1, nothing, isaromatic, :unspecified)
+    end
+    # SmilesAtom(:C, 0, 1, nothing, false, :unspecified)
+    B, bondmaps = bonds(m)
+    bonds₂ = map(B) do bond
+        SmilesBond(bond.order, false, :unspecified, :unspecified)
+    end
+    es₂ = map(bondmaps) do bondmap
+        (bondmap.src, bondmap.dst)
+    end
+    graphmol(es₂, A₂, bonds₂)
+end
+
+"""
+    Base.:(==)(mol₁::Molecule, mol₂::Molecule)
+
+分子の等価
+# 比較する
+- bond order
+"""
+function Base.:(==)(mol₁::Molecule, mol₂::Molecule)
+    setss = permuteindex(mol₁)
+    sets₂ = tomatrix(mol₂)
+    isequal = any(map(sets₁ -> sets₁ == sets₂, setss))
+    return isequal
+end
+
+"""
+    tomatrix
+
+MolecularのSet表現
+各原子について以下のリストを求め，Setにする
+原子名, 原子index i, 隣接原子index j, 結合次数ij
+"""
+function tomatrix(m::Molecule)
+    molset = Set{Set}()
+    n = natom(m)
+    for i ∈ 1:n
+        aᵢ = get_atom(m, i)
+        indices = neighbors(m.graph, i)
+        subset = Set()
+        for j ∈ indices
+            oᵢⱼ = bondorder(m, i, j)
+            data = [aᵢ.name, i, j, oᵢⱼ]
+            push!(subset, data)
+            # @show aᵢ.name, i, j, oᵢⱼ
+        end
+        push!(molset, subset)
+    end
+    return molset
+end
+
+"""
+    permuteindex(m::Molecule)
+
+グラフのvertex indexを入れ替えた全セットを返す
+グラフの等価性を求めるために使用する
+"""
+function permuteindex(m::Molecule)
+    # indexいれかえ
+    n = natom(m)
+    # [1, n]の順列
+    # n!通り
+    setss = []
+    sets = tomatrix(m)
+    for indices ∈ permutations(1:n)
+        sets₂ = deepcopy(sets)
+        # 単射
+        for sᵢ ∈ sets
+            for sᵢⱼ ∈ sᵢ
+                sᵢⱼ[2] = indices[sᵢⱼ[2]]
+                sᵢⱼ[3] = indices[sᵢⱼ[3]]
+            end
+        end
+        push!(setss, sets₂)
+    end
+    return setss
+end
+
+"""
+    moltosmiles(m::Molecule)
+
+Molecule -> SMILES
+"""
+function moltosmiles(m::Molecule)
+    # order = 2 -> "="
+    # order = 3 -> "#"
+    # 結合が複数ある場合は(で分岐
+    m = deepcopy(m)
+    # isparsed
+    for i ∈ 1:natom(m)
+        set_prop!(m.graph, i, :isparsed, false)
+    end
+    # loop indicesをセットする
+    m = closeloop(m)
+    moltosmiles(m, -1, 1)
+end
+
+hasnext(indices, state) = iterate(indices, state) !== nothing
+
+"""
+`m`は分子
+`i₀`は一つ前の対象原子
+`i`は対象の原子
+"""
+function moltosmiles(m::Molecule, i₀::Int, i::Int)
+    set_prop!(m.graph, i, :isparsed, true)
+    aᵢ = get_atom(m, i)
+    print(aᵢ.name)
+    indices = neighbors(m.graph, i)
+    lidxsᵢ = has_prop(m.graph, i, :loopidxs) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
+    print(join(string.(lidxsᵢ), ""))
+    indices = filter(indices) do x
+        if has_prop(m.graph, x, :loopidxs)
+            lidxsⱼ = Set(get_prop(m.graph, x, :loopidxs))
+            # 共通idxがある場合は省く
+            if (0 < length(lidxsᵢ ∩ lidxsⱼ))
+                return false
+            end
+        end
+        # loopidxsが同じのが含まれる場合はスルー
+        return x ≠ i₀
+    end
+    if indices === nothing || length(indices) == 0
+        return nothing
+    end
+    # 隣接原子数
+    next = iterate(indices)
+    index, state = next
+    while next !== nothing
+        j, state = next
+        # loopindexがあったらつける
+        if has_prop(m.graph, j, :loopidxs)
+            lidxs = get_prop(m.graph, j, :loopidxs)
+        end
+        # isparsedな原子の場合は終了
+        isloop = get_prop(m.graph, j, :isparsed)
+        # @show state, i, j, isloop
+        if isloop
+            next = iterate(indices, state)
+            continue
+        end
+        # 最後の結合ならば，()なしで表示
+        if !hasnext(indices, state)
+            printsmiles(m, i, j)
+        else
+            print("(")
+            printsmiles(m, i, j)
+            print(")")
+        end
+        next = iterate(indices, state)
+    end
+end
+
+function printsmiles(m::Molecule, i::Int, j::Int)
+    order = bondorder(m, i, j)
+    if order == 2
+        print("=")
+    elseif order == 3
+        print("#")
+    end
+    aⱼ = get_atom(m, j)
+    # 再帰呼び出し
+    moltosmiles(m, i, j)
+end
+
+function example6()
+    m1 = examplemol2()
+    moltosmiles(m1)
+end
+
+function example7()
+    m1 = examplemol2()
+    # moltosmiles(m1)
+    println()
+    closeloop(m1)
+end
+
+"""
+graph vertex propの
+vectorへpushする
+"""
+function push_prop!(g, i::Int, key::Symbol, value::Any)
+    v = has_prop(g, i, key) ? get_prop(g, i, key) : []
+    push!(v, value)
+    set_prop!(g, i, key, v)
+end
+
+"""
+最小閉路探索
+vertexに情報を埋め込む
+"""
+function closeloop(m::Molecule)
+    closelist = []
+    dfs(m, 1, [], [], closelist)
+    closelist2 = []
+    for c ∈ closelist
+        # 同一閉路は省く
+        if c ∉ closelist2 && reverse(c) ∉ closelist2
+            push!(closelist2, c)
+        end
+    end
+    sort!(closelist, by = c -> length(c))
+    for cᵢ ∈ closelist
+        sᵢ = Set(cᵢ)
+        for cⱼ ∈ closelist2
+            sⱼ = Set(cⱼ)
+            if sⱼ ≠ sⱼ ∩ sᵢ
+                push!(closelist2, cᵢ)
+                break
+            end
+        end
+    end
+    # ループインデックスを埋め込む
+    m₂ = deepcopy(m)
+    for (i, c) ∈ enumerate(closelist2)
+        push_prop!(m₂.graph, c[begin], :loopidxs, i)
+        push_prop!(m₂.graph, c[end-1], :loopidxs, i)
+    end
+    return m₂
+end
+
+"""
+Deep-first search
+find loops
+"""
+function dfs(m::Molecule, v::Int, isvisited, target, closelist)
+    push!(isvisited, v)
+    target = copy(target)
+    if v ∈ target
+        push!(target, v)
+        push!(closelist, target)
+        return target
+    end
+    push!(target, v)
+    indices = neighbors(m.graph, v)
+    for i ∈ indices
+        # 直前の頂点以外
+        i₀ = 1 < length(target) ? target[end-1] : -1
+        if i ≠ i₀
+            dfs(m, i, isvisited, target, closelist)
+        end
+    end
+    return target
 end
