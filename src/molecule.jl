@@ -561,6 +561,8 @@ function moltosmiles(m::Molecule)
     for i ∈ 1:natom(m)
         set_prop!(m.graph, i, :isparsed, false)
     end
+    # loop indicesをセットする
+    m = closeloop(m)
     moltosmiles(m, -1, 1)
 end
 
@@ -576,7 +578,17 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
     aᵢ = get_atom(m, i)
     print(aᵢ.name)
     indices = neighbors(m.graph, i)
+    lidxsᵢ = has_prop(m.graph, i, :loopidxs) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
+    print(join(string.(lidxsᵢ), ""))
     indices = filter(indices) do x
+        if has_prop(m.graph, x, :loopidxs)
+            lidxsⱼ = Set(get_prop(m.graph, x, :loopidxs))
+            # 共通idxがある場合は省く
+            if (0 < length(lidxsᵢ ∩ lidxsⱼ))
+                return false
+            end
+        end
+        # loopidxsが同じのが含まれる場合はスルー
         return x ≠ i₀
     end
     if indices === nothing || length(indices) == 0
@@ -586,11 +598,17 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
     next = iterate(indices)
     index, state = next
     while next !== nothing
-        # isparsedな原子の場合，ループ
         j, state = next
+        # loopindexがあったらつける
+        if has_prop(m.graph, j, :loopidxs)
+            lidxs = get_prop(m.graph, j, :loopidxs)
+        end
+        # isparsedな原子の場合は終了
         isloop = get_prop(m.graph, j, :isparsed)
+        # @show state, i, j, isloop
         if isloop
-            print("1")
+            next = iterate(indices, state)
+            continue
         end
         # 最後の結合ならば，()なしで表示
         if !hasnext(indices, state)
@@ -629,6 +647,16 @@ function example7()
 end
 
 """
+graph vertex propの
+vectorへpushする
+"""
+function push_prop!(g, i::Int, key::Symbol, value::Any)
+    v = has_prop(g, i, key) ? get_prop(g, i, key) : []
+    push!(v, value)
+    set_prop!(g, i, key, v)
+end
+
+"""
 最小閉路探索
 vertexに情報を埋め込む
 """
@@ -653,9 +681,13 @@ function closeloop(m::Molecule)
             end
         end
     end
-    for c in closelist2
-        println(c)
+    # ループインデックスを埋め込む
+    m₂ = deepcopy(m)
+    for (i, c) ∈ enumerate(closelist2)
+        push_prop!(m₂.graph, c[begin], :loopidxs, i)
+        push_prop!(m₂.graph, c[end-1], :loopidxs, i)
     end
+    return m₂
 end
 
 """
