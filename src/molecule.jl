@@ -9,6 +9,7 @@ using Printf
 using LightGraphs, MetaGraphs 
 using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg, GraphMol, SmilesAtom, SmilesBond, graphmol
 using Combinatorics
+using Crayons, Crayons.Box
 
 struct Molecule
     graph::MetaGraph
@@ -81,6 +82,18 @@ function get_atom(m::Molecule, i::Integer)
 end
 
 """
+    isloopatom(m::Molecule, i::Integer)
+
+原子がループを構成しているかどうかを判定する
+事前にcloselistを実行している必要がある
+"""
+function isloopatom(m::Molecule, i::Integer)
+    !has_prop(m.graph, i, :isloop) && return false
+    isloop = get_prop(m.graph, i, :isloop)
+    return isloop
+end
+
+"""
     get_bond(m::Molecule, i::Integer, j::Integer)
 
 原子`i`と原子`j`間の結合`bond`を返す．結合がなければ`nothing`を返す
@@ -113,13 +126,15 @@ atom `i`に接続されているbondsのbond order合計をatom `i`の原子価�
 function nfree(m::Molecule, i::Integer)
     # iに隣接する原子すべてとの結合字数の総和を計算する
     indices = neighbors(m.graph, i)
-    atom = get_prop(m.graph, i, :atom)
+    atom = get_atom(m, i)
     valence = nvalence(atom)
     if length(indices) == 0
         return valence
     end
-    n = reduce(indices) do x, j
-        bond = get_prop(m.graph, i, j, :bond)
+    # 周辺との結合次数の総和を計算する
+    # ??? init = 0にしないといけない
+    n = reduce(indices, init = 0) do x, j
+        bond = get_bond(m, i, j)
         y = bond.order
         return x + y
     end
@@ -178,7 +193,9 @@ function nbond(mol::Molecule)
 end
 
 """
-原子追加
+    addable_atom(mol::Molecule; atomlist = atomlist)
+
+Action: 原子追加
 すべての原子a ∈ molについて水素を除いた残価数を計算
 残価数 `nfree` が1以上なら，原子b ∈ 原子リストが追加可能である．
 また，原子追加後に同じ分子は削除してuniqueな原子追加を残す
@@ -204,7 +221,9 @@ function addable_atom(mol::Molecule; atomlist = atomlist)
 end
 
 """
-結合追加
+    addable_bond(mol::Molecule)
+
+Action: 結合追加
 None => [singlebond, doublebond, triplebond] : 原子間結合なし
 singlebond => [doublebond, triplebond]       : 結合次数1
 doublebond => [triplebond]                   : 結合次数2
@@ -230,26 +249,31 @@ function addable_bond(mol::Molecule)
 end
 
 """
-結合削除
-singlebond => [None]                        : 結合次数1
-doublebond => [None, singlebond]            : 結合次数2
+    removable_bond(mol::Molecule)
+
+Action: 結合削除
+singlebond => [None]                        : 結合次数1\\
+doublebond => [None, singlebond]            : 結合次数2\\
 triplebond => [None, singlebond, doublebond]: 結合次数3
 """
 function removable_bond(mol::Molecule)
+    # ループ情報をセットする
+    closeloop(mol)
     # 結合削除dict
     bonddict = Dict(0 => [], 1 => [0], 2 => [0, 1], 3 => [0, 1, 2])
     n_atom = natom(mol)
     mols = Molecule[]
     list = []
-    for i ∈ 1:n_atom, j ∈ 1:n_atom
+    for i ∈ 1:n_atom, j ∈ i+1:n_atom
         order = bondorder(mol, i, j)
         for orderᵢⱼ ∈ bonddict[order]
             bondᵢⱼ = Bond(orderᵢⱼ)
             if orderᵢⱼ == 0
-                # 結合削除時 1  -> 0のときは
-                # edge削除
-                mol₂ = remove_bond(mol, i, j)
-                push!(mols, mol₂)
+                if isloopatom(mol, i) && isloopatom(mol, j)
+                    # 結合削除時 1  -> 0 かつ loopしている場合，edge削除
+                    mol₂ = remove_bond(mol, i, j)
+                    push!(mols, mol₂)
+                end
             else
                 push!(mols, add_bond(mol, i, j, bondᵢⱼ))
             end
@@ -793,20 +817,55 @@ function example9()
     end
     mol = smilestomol(smiles₀)
     mols₀ = [mol]
-    for i ∈ 1:3
+    for i ∈ 1:40
         mols = []
+        mols₁ = []
+        mols₂ = []
+        mols₃ = []
         for mol ∈ mols₀
+            @show moltosmiles(mol)
+            # molの最後のneighborsを表示
+            @info neighbors(mol.graph, natom(mol))
             aa = addable_atom(mol, atomlist=al)
             ab = addable_bond(mol)
-            push!(mols, aa...)
-            push!(mols, ab...)
+            ac = removable_bond(mol)
+            push!(mols₁, aa...)
+            push!(mols₂, ab...)
+            push!(mols₃, ac...)
         end
         @info i
-        for m ∈ mols
-            print(moltosmiles(m), " ")
+        for m ∈ mols₁
+            s = moltosmiles(m)
+            print(
+                GREEN_FG, 
+                s,
+                " "
+            )
         end
-        println()
-        mols₀ = mols
+        for m ∈ mols₂
+            s = moltosmiles(m)
+            print(
+                RED_FG, 
+                s,
+                " "
+            )
+        end
+        for m ∈ mols₃
+            s = moltosmiles(m),
+            print(
+                BLUE_FG, 
+                s,
+                " "
+            )
+        end
+
+        println(Crayon(reset=true), "")
+        # 1つだけmolをrandomにとりだしてTransを進める
+        @show length(mols)
+        # k = rand(1:length(mols))
+        # mols₀ = mols[k:k]
+        # mols₀ = [mols₁..., mols₂..., mols₃...]
+        mols₀ = mols₁[1:1]
     end
 end
 
@@ -827,6 +886,8 @@ end
 
 最小閉路探索
 vertexに情報を埋め込む
+loopの始端と終端 vertex に `:loopidxs` をセットする
+loopに含まれている vertex に ``:isloop = true` をセットする
 """
 function closeloop(m::Molecule)
     closelist = []
@@ -852,8 +913,13 @@ function closeloop(m::Molecule)
     # ループインデックスを埋め込む
     m₂ = deepcopy(m)
     for (i, c) ∈ enumerate(closelist2)
+        # 始端と終端情報
         push_prop!(m₂.graph, c[begin], :loopidxs, i)
         push_prop!(m₂.graph, c[end-1], :loopidxs, i)
+        # ループを構成している原子
+        for idx ∈ c
+            set_prop!(m₂.graph, idx, :isloop, true)
+        end
     end
     return m₂
 end
