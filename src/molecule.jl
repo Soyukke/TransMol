@@ -1,8 +1,10 @@
 export Molecule
 export add_atom!, add_atom, add_bond, add_bond!
-export natom, nbond, writesdf, smilestomol
+export natom, nbond, writesdf, smilestomol, moltosmiles
 export atoms, bonds
+export get_atom, get_bond
 export natom, nbond, writesdf
+export addable_atom, addable_bond, removable_bond
 using Printf
 using LightGraphs, MetaGraphs 
 using MolecularGraph: sdftomol, sdfilewriter, coordgen, drawsvg, GraphMol, SmilesAtom, SmilesBond, graphmol
@@ -43,10 +45,15 @@ end
 
 """
 分子`m`へ原子`i`と原子`j`に結合`b`を追加する
+すでに結合が存在する場合はset_propでbond `b`を上書きする
 """
 function add_bond!(m::Molecule, i::Integer, j::Integer, b::Bond)
     dict = Dict(:bond=>b)
-    add_edge!(m.graph, i, j, dict)
+    if !has_edge(m.graph, i, j)
+        add_edge!(m.graph, i, j, dict)
+    else
+        set_prop!(m.graph, i, j, :bond, b)
+    end
 end
 
 """
@@ -73,6 +80,20 @@ function get_atom(m::Molecule, i::Integer)
     return atom
 end
 
+"""
+    get_bond(m::Molecule, i::Integer, j::Integer)
+
+原子`i`と原子`j`間の結合`bond`を返す．結合がなければ`nothing`を返す
+"""
+function get_bond(m::Molecule, i::Integer, j::Integer)
+    if has_edge(m.graph, i, j) && has_prop(m.graph, i, j, :bond)
+        bond = get_prop(m.graph, i, j, :bond)
+        return bond
+    else
+        return nothing
+    end
+end
+
 function get_coords(m::Molecule, i::Integer)
     if !has_prop(m.graph, i, :coords)
         return Float64[0, 0, 0]
@@ -92,26 +113,31 @@ atom `i`に接続されているbondsのbond order合計をatom `i`の原子価�
 function nfree(m::Molecule, i::Integer)
     # iに隣接する原子すべてとの結合字数の総和を計算する
     indices = neighbors(m.graph, i)
+    atom = get_prop(m.graph, i, :atom)
+    valence = nvalence(atom)
+    if length(indices) == 0
+        return valence
+    end
     n = reduce(indices) do x, j
         bond = get_prop(m.graph, i, j, :bond)
         y = bond.order
         return x + y
     end
-    atom = get_prop(m.graph, i, :atom)
-    valence = atom.valence
     return valence - n
 end
 
+"""
+    bondorder(m::Molecule, i::Integer, j::Integer)
+
+原子`i`, `j`間の結合次数を調べる
+"""
 function bondorder(m::Molecule, i::Integer, j::Integer)
-    try
-        bond = get_prop(m.graph, i, j, :bond)
-        if bond !== nothing
-            return bond.order
-        end
-    catch e
-        return Int(0)
+    bond = get_bond(m, i, j)
+    if bond !== nothing
+        return bond.order
+    else
+        return 0
     end
-    # finallyでreturn すると必ずfinallyでreturnされるのでこうする
 end
 
 """
@@ -126,6 +152,7 @@ function atoms(mol::Molecule)
 end
 
 """
+    bonds(mol::Molecule)
 全結合
 """
 function bonds(mol::Molecule)
@@ -156,7 +183,7 @@ end
 残価数 `nfree` が1以上なら，原子b ∈ 原子リストが追加可能である．
 また，原子追加後に同じ分子は削除してuniqueな原子追加を残す
 """
-function addable_atom(mol::Molecule)
+function addable_atom(mol::Molecule; atomlist = atomlist)
     mols = Molecule[]
     atoms = vertices(mol.graph)
     for (i, a) ∈ enumerate(atoms)
@@ -182,23 +209,22 @@ None => [singlebond, doublebond, triplebond] : 原子間結合なし
 singlebond => [doublebond, triplebond]       : 結合次数1
 doublebond => [triplebond]                   : 結合次数2
 原子i, 原子jについてそれぞれ残原子価が1以上のときに結合追加可能なパターンを列挙する
-結合追加後の分子が同じものは取り除く
 """
 function addable_bond(mol::Molecule)
-    bonddict = Dict(0 => [1, 2, 3], 1 => [2, 3], 2 => [3])
+    bonddict = Dict(0 => [1, 2, 3], 1 => [2, 3], 2 => [3], 3 => [])
     mols = Molecule[]
     n_atom = natom(mol)
-    for i ∈ 1:n_atom, j ∈ 1:n_atom
+    for i ∈ 1:n_atom, j ∈ i+1:n_atom
         nf1 = nfree(mol, i)
         nf2 = nfree(mol, j)
         order = bondorder(mol, i, j)
         nfreemin = min(nf1, nf2)
-        bonds = filter(x->x ≤ nfreemin, bonddict[order])
+        # 結合次数の増分だけ余裕がある場合，候補として追加する
+        bonds = filter(x -> x - order ≤ nfreemin, bonddict[order])
         for order₂ ∈ bonds
             bond₂ = Bond(order₂)
             push!(mols, add_bond(mol, i, j, bond₂))
         end
-        # @show order, nfreemin, filter(x->x ≤ nfreemin, bonddict[order])
     end
     return mols
 end
@@ -455,40 +481,68 @@ function smilestomol(smiles::String)
     mol = Molecule()
     x = split(smiles, "")
     next = iterate(x)
-    smilestomol(mol, x, 1)
+    mol, _ = smilestomol(mol, x, -1, 1)
+    return mol
 end
 
 """
 再帰的にMoleculeを作る
+
+例1.
+CCC -> C, C, C
+
+
+例2.
+C=CC -> C, =, C, C
+= が来たらbondorder = 2としてセット
+次の原子を追加時，結合次数を2とする
 """
-function smilestomol(mol::Molecule, x::Vector, i)
+function smilestomol(mol::Molecule, x::Vector, i₀::Integer, i::Integer)
     # 注目している原子
-    current_atom_index = -1
-    current_bond_order = 1
+    order = 1
     next = iterate(x, i)
+    t, i = next
+    # t -> mol
     while next !== nothing 
         t, i = next
         # nestを抜ける
         if t == ")"
-            println("out next")
-            return mol, t
+            return mol, i
         elseif t == "("
-            # 結合をつなげる原子indexを保持する？
-            println(t, "in nest")
-            smilestomol(mol, x, i)
-        else t ∈ ["1", "2", "3", "4", "5", "6", "7", "8"]
-            # 芳香環は別関数で対処する
-        end
-        # 原子と一致
-        if haskey(atomdict, t)
-            println("原子")
+            # 結合分岐．indexをすすめる
+            mol, i = smilestomol(mol, x, i₀, i)
+        elseif t ∈ ["1", "2", "3", "4", "5", "6", "7", "8"]
+            # 同じloop indexを持つ原子indexを探し，つなげる
+            for k ∈ 1:natom(mol)
+                if has_prop(mol.graph, k, :loopidxs)
+                    loopidxs = get_prop(mol.graph, k, :loopidxs)
+                    # 同じループインデックスを持つ原子と接続する
+                    if parse(Int, t) ∈ loopidxs
+                        bond = Bond(order)
+                        set_prop!(mol.graph, i, k, :bond, bond)
+                        break
+                    end
+                end
+            end
+            # 一つ前の原子にloop indexを追加する
+            push_prop!(mol.graph, i₀, :loopidxs, parse(Int, t))
+        elseif t == "="
+            order = 2
+        elseif t == "#"
+            order = 3
+        elseif haskey(atomdict, t)
             # 原子を追加したら注目している原子は追加した原子
-            @show current_atom_index, current_bond_order
-            current_atom_index = natom(mol)
-        elseif haskey(bonddict, t)
-            println("結合")
-            # 次に追加する原子の結合字数
-            current_bond_order = bonddict[t]
+            add_atom!(mol, Atom(atomdict[t]...))
+            n = natom(mol)
+            # 結合を追加
+            if i₀ ≠ -1
+                bond = Bond(order)
+                add_bond!(mol, i₀, n, bond)
+            end
+            # 対象原子indexを更新
+            i₀ = natom(mol)
+            # 結合追加直後は結合次数1とする
+            order = 1
         end
         next = iterate(x, i)
     end
@@ -633,12 +687,13 @@ hasnext(indices, state) = iterate(indices, state) !== nothing
 `i`は対象の原子
 """
 function moltosmiles(m::Molecule, i₀::Int, i::Int)
+    smiles = ""
     set_prop!(m.graph, i, :isparsed, true)
     aᵢ = get_atom(m, i)
-    print(aᵢ.name)
+    smiles *= string(aᵢ.name)
     indices = neighbors(m.graph, i)
     lidxsᵢ = has_prop(m.graph, i, :loopidxs) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
-    print(join(string.(lidxsᵢ), ""))
+    smiles *= join(string.(lidxsᵢ), "")
     indices = filter(indices) do x
         if has_prop(m.graph, x, :loopidxs)
             lidxsⱼ = Set(get_prop(m.graph, x, :loopidxs))
@@ -651,7 +706,7 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
         return x ≠ i₀
     end
     if indices === nothing || length(indices) == 0
-        return nothing
+        return smiles
     end
     # 隣接原子数
     next = iterate(indices)
@@ -671,26 +726,27 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
         end
         # 最後の結合ならば，()なしで表示
         if !hasnext(indices, state)
-            printsmiles(m, i, j)
+            smiles *= printsmiles(m, i, j)
         else
-            print("(")
-            printsmiles(m, i, j)
-            print(")")
+            smiles *= "(" * printsmiles(m, i, j) * ")"
         end
         next = iterate(indices, state)
     end
+    return smiles
 end
 
 function printsmiles(m::Molecule, i::Int, j::Int)
+    s = ""
     order = bondorder(m, i, j)
     if order == 2
-        print("=")
+        s *= "="
     elseif order == 3
-        print("#")
+        s *= "#"
     end
     aⱼ = get_atom(m, j)
     # 再帰呼び出し
-    moltosmiles(m, i, j)
+    s *= moltosmiles(m, i, j)
+    return s
 end
 
 function example6()
@@ -706,6 +762,57 @@ function example7()
 end
 
 """
+smiles <-> mol <-> smiles
+"""
+function example8()
+    ssmiles = [
+        "CCC",
+        "C=C",
+        "C=CC",
+        "CC=C",
+        "C1CCCCC1",
+        "C1CC(=CCC)CCC1"
+    ]
+    for smiles₀ ∈ ssmiles
+        mol = smilestomol(smiles₀)
+        smiles₁ = moltosmiles(mol)
+        @info smiles₀, smiles₁
+        @assert smiles₀ == smiles₁
+    end
+end
+
+"""
+actionを進めていき，分岐をsmilesで出力する
+"""
+function example9()
+    smiles₀ = "C"
+    # C, Oだけを使う
+    global atomlist
+    al = filter(atomlist) do a
+        return a.name ∈ [:O, :C]
+    end
+    mol = smilestomol(smiles₀)
+    mols₀ = [mol]
+    for i ∈ 1:3
+        mols = []
+        for mol ∈ mols₀
+            aa = addable_atom(mol, atomlist=al)
+            ab = addable_bond(mol)
+            push!(mols, aa...)
+            push!(mols, ab...)
+        end
+        @info i
+        for m ∈ mols
+            print(moltosmiles(m), " ")
+        end
+        println()
+        mols₀ = mols
+    end
+end
+
+"""
+    push_prop!(g, i::Int, key::Symbol, value::Any)
+
 graph vertex propの
 vectorへpushする
 """
@@ -716,6 +823,8 @@ function push_prop!(g, i::Int, key::Symbol, value::Any)
 end
 
 """
+    closeloop(m::Molecule)
+
 最小閉路探索
 vertexに情報を埋め込む
 """

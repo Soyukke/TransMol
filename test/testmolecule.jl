@@ -23,7 +23,23 @@ function test_nbond01()
     @test n_bond == 2
 end
 
+function test_moltosmiles01()
+    ssmiles = [
+        "CCC",
+        "C=CC",
+        "CC=C",
+        "C1CCCCC1",
+        "C1CC(=CCC)CCC1"
+    ]
+    for smiles₀ ∈ ssmiles
+        mol = smilestomol(smiles₀)
+        smiles₁ = moltosmiles(mol)
+        @test smiles₀ == smiles₁
+    end
+end
+
 @testset "TransMol" begin
     test_natom01()
     test_nbond01()
+    test_moltosmiles01()
 end
