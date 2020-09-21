@@ -282,6 +282,12 @@ function removable_bond(mol::Molecule)
     return mols
 end
 
+function print_transition(io, mols::Vector{Molecule})
+    smiles_list = moltosmiles.(mols)
+    str = join(smiles_list, " -> ")
+    print(io, str)
+end
+
 function example1()
     mol = Molecule()
     C = Atom(:C, 6, 4)
@@ -867,6 +873,25 @@ function example9()
         # mols₀ = [mols₁..., mols₂..., mols₃...]
         mols₀ = mols₁[1:1]
     end
+end
+
+function example10()
+    smiles = "C"
+    global atomlist
+    al = filter(atomlist) do a
+        return a.name ∈ [:O, :C]
+    end
+    mol₀ = smilestomol(smiles)
+    molᵢ = mol₀
+    transmols = Molecule[]
+    push!(transmols, molᵢ)
+    for i ∈ 1:5
+        mols = addable_atom(molᵢ, atomlist = al)
+        # random choice
+        molᵢ = rand(mols)
+        push!(transmols, molᵢ)
+    end
+    print_transition(stdout, transmols)
 end
 
 """
