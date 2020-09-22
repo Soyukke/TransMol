@@ -72,6 +72,14 @@ function Base.show(io::IO, s::Smiles)
     Base.show(io, s.smiles)
 end
 
+Base.iterate(smiles::Smiles) = iterate(smiles, 1)
+function Base.iterate(smiles::Smiles, i::Integer)
+    if length(smiles) < i
+        return nothing
+    end
+    return smiles[i], i + 1
+end
+
 """
 for debug
 """
@@ -82,5 +90,3 @@ function main()
     ""
     return smi
 end
-
-main()

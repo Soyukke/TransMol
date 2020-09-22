@@ -508,10 +508,12 @@ end
 bonddict = Dict(""=>1, "="=>2, "#"=>3)
 
 function smilestomol(smiles::String)
+    return smilestomol(Smiles(smiles))
+end
+
+function smilestomol(smiles::Smiles)
     mol = Molecule()
-    x = split(smiles, "")
-    next = iterate(x)
-    mol, _ = smilestomol(mol, x, -1, 1)
+    mol, _ = smilestomol(mol, smiles, -1, 1)
     return mol
 end
 
@@ -527,7 +529,7 @@ C=CC -> C, =, C, C
 = が来たらbondorder = 2としてセット
 次の原子を追加時，結合次数を2とする
 """
-function smilestomol(mol::Molecule, x::Vector, i₀::Integer, i::Integer)
+function smilestomol(mol::Molecule, x::Smiles, i₀::Integer, i::Integer)
     # 注目している原子
     order = 1
     next = iterate(x, i)
