@@ -93,6 +93,12 @@ function isloopatom(m::Molecule, i::Integer)
     return isloop
 end
 
+function isaromatic(m::Molecule, i::Integer)
+    !has_prop(m.graph, i, :isaromatic) && return false
+    isarom = get_prop(m.graph, i, :isaromatic)
+    return isarom 
+end
+
 """
     get_bond(m::Molecule, i::Integer, j::Integer)
 
@@ -501,10 +507,16 @@ SMILES文字列
 function smiles(mol::Molecule)
 end
 
+# 通常原子
 atomdict = Dict()
 for a in atomdata
     push!(atomdict, string(a[begin]) => a)
 end
+aromaticdict = Dict(
+    map(aromatictokens) do token
+        token => Atom(Symbol(aromatic2atom(token)))
+    end
+)
 bonddict = Dict(""=>1, "="=>2, "#"=>3)
 
 function smilestomol(smiles::String)
@@ -562,9 +574,16 @@ function smilestomol(mol::Molecule, x::Smiles, i₀::Integer, i::Integer)
             order = 2
         elseif t == "#"
             order = 3
-        elseif haskey(atomdict, t)
+        elseif haskey(atomdict, t) || haskey(aromaticdict, t)
             # 原子を追加したら注目している原子は追加した原子
-            add_atom!(mol, Atom(atomdict[t]...))
+            if haskey(atomdict, t)
+                # 通常原子
+                add_atom!(mol, Atom(atomdict[t]...))
+            else
+                add_atom!(mol, aromaticdict[t])
+                # aromaticはaromaticフラグをtrueにする
+                set_prop!(mol.graph, natom(mol), :isaromatic, true)
+            end
             n = natom(mol)
             # 結合を追加
             if i₀ ≠ -1

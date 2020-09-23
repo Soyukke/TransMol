@@ -14,6 +14,22 @@ smiles_tokens = [
     "/", "\\", "."
 ]
 
+atomtokens = ["B", "C", "N", "O", "S", "P", "F", "I", "Cl", "Br"]
+aromatictokens = ["c", "n", "o", "s"]
+
+"""
+    aromatic2atom(token::String)
+
+# Examples
+```julia
+julia> aromatic2atom("br")
+"Br"
+```
+"""
+function aromatic2atom(token::String)
+    uppercase(token[begin]) * token[begin+1:end]
+end
+
 struct Smiles <: AbstractString
     smiles::String
     tokens::Vector{String}
