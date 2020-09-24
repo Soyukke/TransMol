@@ -27,7 +27,7 @@ julia> aromatic2atom("br")
 ```
 """
 function aromatic2atom(token::String)
-    uppercase(token[begin]) * token[begin+1:end]
+    return uppercasefirst(token)
 end
 
 struct Smiles <: AbstractString

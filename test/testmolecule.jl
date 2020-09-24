@@ -29,7 +29,8 @@ function test_moltosmiles01()
         "C=CC",
         "CC=C",
         "C1CCCCC1",
-        "C1CC(=CCC)CCC1"
+        "C1CC(=CCC)CCC1",
+        "c1ccccc1"
     ]
     for smiles₀ ∈ ssmiles
         mol = smilestomol(smiles₀)

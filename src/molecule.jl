@@ -741,7 +741,12 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
     smiles = ""
     set_prop!(m.graph, i, :isparsed, true)
     aᵢ = get_atom(m, i)
-    smiles *= string(aᵢ.name)
+    # aromatic or not
+    if isaromatic(m, i)
+        smiles *= lowercase(string(aᵢ.name))
+    else
+        smiles *= string(aᵢ.name)
+    end
     indices = neighbors(m.graph, i)
     lidxsᵢ = has_prop(m.graph, i, :loopidxs) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
     smiles *= join(string.(lidxsᵢ), "")
