@@ -528,7 +528,7 @@ function smilestomol(smiles::Smiles)
     mol = Molecule()
     mol, _ = smilestomol(mol, smiles, -1, 1)
     mol = closeloop(mol)
-    # kekulize!(mol)
+    kekulize!(mol)
     return mol
 end
 
@@ -619,14 +619,16 @@ end
 """
 function kekulize!(mol::Molecule)
     for i ∈ 1:natom(mol)
-        if has_prop(mol.graph, i, :isbeginloop)
+        if has_prop(mol.graph, i, :isbeginloop) && isaromatic(mol, i)
             idxs = get_prop(mol.graph, i, :groupidxs)
             # idxsが偶数個である場合に埋め込む
             n = length(idxs)
-            @assert iseven(n)
+            @assert iseven(n) "number of atom $(n) is not even"
             for index ∈ 1:n
                 order = mod(index, 2) + 1
-                add_bond!(mol, idxs[index], idxs[mod(index+1, n)], Bond(order))
+                p = index
+                q = (index == n) ? 1 : index + 1
+                add_bond!(mol, idxs[p], idxs[q], Bond(order))
             end
         end
     end
@@ -774,6 +776,7 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
     set_prop!(m.graph, i, :isparsed, true)
     aᵢ = get_atom(m, i)
     # aromatic or not
+    # aromaticの場合はlowercaseで出力し，結合次数は無視する
     if isaromatic(m, i)
         smiles *= lowercase(string(aᵢ.name))
     else
@@ -826,7 +829,9 @@ end
 function printsmiles(m::Molecule, i::Int, j::Int)
     s = ""
     order = bondorder(m, i, j)
-    if order == 2
+    if isaromatic(m, i) && isaromatic(m, j)
+        s *= ""
+    elseif order == 2
         s *= "="
     elseif order == 3
         s *= "#"
@@ -997,7 +1002,7 @@ function closeloop(m::Molecule)
     m₂ = deepcopy(m)
     for (i, c) ∈ enumerate(closelist2)
         # 始端にループを構成する原子indexを埋め込む
-        set_prop!(m₂.graph, c[begin], :groupidxs, c)
+        set_prop!(m₂.graph, c[begin], :groupidxs, c[begin:end-1])
         # 始端と終端情報
         set_prop!(m₂.graph, c[begin], :isbeginloop, true)
         set_prop!(m₂.graph, c[end-1], :isendloop, true)
