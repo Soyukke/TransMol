@@ -520,12 +520,15 @@ aromaticdict = Dict(
 bonddict = Dict(""=>1, "="=>2, "#"=>3)
 
 function smilestomol(smiles::String)
-    return smilestomol(Smiles(smiles))
+    mol = smilestomol(Smiles(smiles))
+    return mol
 end
 
 function smilestomol(smiles::Smiles)
     mol = Molecule()
     mol, _ = smilestomol(mol, smiles, -1, 1)
+    mol = closeloop(mol)
+    # kekulize!(mol)
     return mol
 end
 
@@ -556,6 +559,7 @@ function smilestomol(mol::Molecule, x::Smiles, i₀::Integer, i::Integer)
             # 結合分岐．indexをすすめる
             mol, i = smilestomol(mol, x, i₀, i)
         elseif t ∈ ["1", "2", "3", "4", "5", "6", "7", "8"]
+            isbeginloop = true
             # 同じloop indexを持つ原子indexを探し，つなげる
             for k ∈ 1:natom(mol)
                 if has_prop(mol.graph, k, :loopidxs)
@@ -563,13 +567,20 @@ function smilestomol(mol::Molecule, x::Smiles, i₀::Integer, i::Integer)
                     # 同じループインデックスを持つ原子と接続する
                     if parse(Int, t) ∈ loopidxs
                         bond = Bond(order)
-                        set_prop!(mol.graph, i, k, :bond, bond)
+                        add_bond!(mol, i₀, k, bond)
+                        isbeginloop = false
                         break
                     end
                 end
             end
             # 一つ前の原子にloop indexを追加する
-            push_prop!(mol.graph, i₀, :loopidxs, parse(Int, t))
+            if isbeginloop
+                set_prop!(mol.graph, i₀, :isbeginloop, true)
+                push_prop!(mol.graph, i₀, :loopidxs, parse(Int, t))
+            else
+                set_prop!(mol.graph, i₀, :isendloop, true)
+                push_prop!(mol.graph, i₀, :loopidxs, parse(Int, t))
+            end
         elseif t == "="
             order = 2
         elseif t == "#"
@@ -598,6 +609,27 @@ function smilestomol(mol::Molecule, x::Smiles, i₀::Integer, i::Integer)
         next = iterate(x, i)
     end
     return mol, nothing
+end
+
+"""
+    kekulize!(mol::Molecule)
+
+`mol`に埋め込まれた情報から芳香族の結合次数を埋め込む
+`:loopidxs`が同一なグループを列挙し，順に処理する
+"""
+function kekulize!(mol::Molecule)
+    for i ∈ 1:natom(mol)
+        if has_prop(mol.graph, i, :isbeginloop)
+            idxs = get_prop(mol.graph, i, :groupidxs)
+            # idxsが偶数個である場合に埋め込む
+            n = length(idxs)
+            @assert iseven(n)
+            for index ∈ 1:n
+                order = mod(index, 2) + 1
+                add_bond!(mol, idxs[index], idxs[mod(index+1, n)], Bond(order))
+            end
+        end
+    end
 end
 
 """
@@ -748,10 +780,10 @@ function moltosmiles(m::Molecule, i₀::Int, i::Int)
         smiles *= string(aᵢ.name)
     end
     indices = neighbors(m.graph, i)
-    lidxsᵢ = has_prop(m.graph, i, :loopidxs) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
+    lidxsᵢ = ((has_prop(m.graph, i, :isbeginloop) || has_prop(m.graph, i, :isendloop)) && has_prop(m.graph, i, :loopidxs)) ? Set(get_prop(m.graph, i, :loopidxs)) : Set()
     smiles *= join(string.(lidxsᵢ), "")
     indices = filter(indices) do x
-        if has_prop(m.graph, x, :loopidxs)
+        if has_prop(m.graph, x, :isbeginloop) || has_prop(m.graph, x, :isendloop)
             lidxsⱼ = Set(get_prop(m.graph, x, :loopidxs))
             # 共通idxがある場合は省く
             if (0 < length(lidxsᵢ ∩ lidxsⱼ))
@@ -964,11 +996,14 @@ function closeloop(m::Molecule)
     # ループインデックスを埋め込む
     m₂ = deepcopy(m)
     for (i, c) ∈ enumerate(closelist2)
+        # 始端にループを構成する原子indexを埋め込む
+        set_prop!(m₂.graph, c[begin], :groupidxs, c)
         # 始端と終端情報
-        push_prop!(m₂.graph, c[begin], :loopidxs, i)
-        push_prop!(m₂.graph, c[end-1], :loopidxs, i)
+        set_prop!(m₂.graph, c[begin], :isbeginloop, true)
+        set_prop!(m₂.graph, c[end-1], :isendloop, true)
         # ループを構成している原子
         for idx ∈ c
+            push_prop!(m₂.graph, idx, :loopidxs, i)
             set_prop!(m₂.graph, idx, :isloop, true)
         end
     end
